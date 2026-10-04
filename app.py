@@ -14,7 +14,7 @@ st.title("🎬 Pro AI Movie Recap & Dubbing Tool")
 
 # Sidebar Settings
 st.sidebar.header("⚙️ App Settings")
-api_key = st.sidebar.text_input("Gemini API Key ထည့်ပါ", type="password")
+api_key = st.sidebar.text_input("Gemini API Key ထည့်ပါ")
 
 voice_option = st.sidebar.selectbox(
     "AI မြန်မာအသံ ရွေးပါ",
