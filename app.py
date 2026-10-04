@@ -2,96 +2,168 @@ import asyncio
 import os
 import tempfile
 import google.generativeai as genai
+import numpy as np
 import streamlit as st
 import edge_tts
+from moviepy.editor import AudioFileClip, VideoFileClip, vfx
 
 st.set_page_config(
-    page_title="AI Video Dubbing Editor", layout="wide", page_icon="🎬"
+    page_title="Pro AI Movie Recapper", layout="wide", page_icon="🎬"
 )
-st.title("🎬 AI Video Dubbing & Recap Editor")
+st.title("🎬 Pro AI Movie Recap & Dubbing Tool")
 
-# Sidebar - API Key Config
-st.sidebar.header("⚙️ Settings")
+# Sidebar Settings
+st.sidebar.header("⚙️ App Settings")
 api_key = st.sidebar.text_input("Gemini API Key ထည့်ပါ", type="password")
+
+voice_option = st.sidebar.selectbox(
+    "AI မြန်မာအသံ ရွေးပါ",
+    ["my-MM-ThihaNeural (Male)", "my-MM-NilarNeural (Female)"],
+)
+
+recap_style = st.sidebar.selectbox(
+    "Movie Recap စတိုင် ရွေးချယ်ပါ",
+    [
+        "1. Standard Narrative (အစဉ်လိုက် ပေါ့ပေါ့ပါးပါး ပြောပြမည်)",
+        "2. Short-Form Fast (TikTok/Reals စက္ကန့်ပိုင်း ရင်ခုန်စရာ)",
+        "3. Ending Explained & Analysis (ဇာတ်သိမ်းအသေးစိတ် သုံးသပ်မည်)",
+        "4. Funny Commentary (ဟာသနှင့် စနောက်သရော် ပြောပြမည်)",
+        "5. Survival & Horror Rules (သဲထိတ်ရင်ဖို လွတ်မြောက်ရေးစနစ်)",
+        "6. Character-Focused (ဇာတ်ကောင် သီးသန့် အဓိကထားမည်)",
+    ],
+)
+
+st.sidebar.subheader("🛡️ Anti-Copyright (မူပိုင်ခွင့် ကာကွယ်ရေး)")
+enable_flip = st.sidebar.checkbox("Video ဘယ်/ညာ မှန်တုံ့ပြန် ပြောင်းမည် (Flip)", value=True)
+enable_speed = st.sidebar.checkbox("Speed 1.05x အနည်းငယ် မြှင့်မည်", value=True)
 
 # Step 1: Upload Video
 st.header("Step 1: Video တင်ပါ")
 uploaded_video = st.file_uploader(
-    "Recap ပြုလုပ်လိုသည့် Video ဖိုင် ရွေးပါ (.mp4)", type=["mp4"]
+    "Recap ပြုလုပ်လိုသည့် Video ဖိုင် ရွေးပါ (.mp4)", type=["mp4", "mov"]
 )
 
 if uploaded_video:
     st.video(uploaded_video)
 
-# Step 2: Source Text & Translation
-st.header("Step 2: စာသားစစ်ဆေးခြင်းနှင့် ဘာသာပြန်ခြင်း")
-source_text = st.text_area(
-    "မူရင်း စာသား ( Chinese / English Subtitle )", height=150
-)
+    # Step 2: Generate Script with Gemini
+    st.header("Step 2: AI Script & Myanmar Voiceover ဖန်တီးခြင်း")
 
-if st.button("Gemini ဖြင့် မြန်မာသို့ ဘာသာပြန်မည်"):
-    if not api_key:
-        st.error("Gemini API Key အရင်ထည့်သွင်းပေးပါ။")
-    elif not source_text:
-        st.warning("မူရင်း စာသား ရိုက်ထည့်ပါ။")
-    else:
-        try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            prompt = f"Translate the following subtitles/transcript into natural, engaging spoken Burmese for a video recap:\n\n{source_text}"
+    if st.button("🚀 AI Script နှင့် မြန်မာအသံ စတင်ဖန်တီးမည်"):
+        if not api_key:
+            st.error("Sidebar တွင် Gemini API Key အရင်ထည့်သွင်းပေးပါ။")
+        else:
+            try:
+                genai.configure(api_key=api_key)
 
-            with st.spinner("Gemini AI ဘာသာပြန်နေပါသည်..."):
-                response = model.generate_content(prompt)
-                st.session_state["translated_text"] = response.text
-                st.success("ဘာသာပြန်ဆိုမှု အောင်မြင်ပါသည်။")
-        except Exception as e:
-            st.error(f"Error: {e}")
+                # Save video to temp file
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".mp4"
+                ) as tmp_v:
+                    tmp_v.write(uploaded_video.read())
+                    video_path = tmp_v.name
 
-translated_text = st.text_area(
-    "မြန်မာဘာသာပြန် စာသား",
-    value=st.session_state.get("translated_text", ""),
-    height=150,
-)
+                with st.spinner("AI က ဗီဒီယိုကို လေ့လာပြီး Script ရေးသားနေပါသည်..."):
+                    video_file = genai.upload_file(path=video_path)
+                    model = genai.GenerativeModel("gemini-2.5-flash")
 
-# Step 3: Text-to-Speech (AI Voice)
-st.header("Step 3: မြန်မာ AI အသံ ပြုလုပ်ခြင်း")
-voice_option = st.selectbox(
-    "AI အသံ ရွေးချယ်ပါ",
-    [
-        "my-MM-ThihaNeural (Male)",
-        "my-MM-NilarNeural (Female)",
-    ],
-)
+                    prompt = f"""
+                    You are a professional movie recap creator. Watch and listen to this video.
+                    Generate a Burmese spoken script for a video recap using this style: {recap_style}.
+                    Keep the script clear, natural, and engaging in modern spoken Burmese.
+                    """
 
+                    response = model.generate_content([video_file, prompt])
+                    script_text = response.text
+                    st.session_state["script_text"] = script_text
 
-async def generate_audio_file(text, voice_code, output_path):
-    communicate = edge_tts.Communicate(text, voice_code)
-    await communicate.save(output_path)
+                    # Delete uploaded file from Gemini server
+                    try:
+                        genai.delete_file(video_file.name)
+                    except:
+                        pass
 
+                # TTS Generation
+                with st.spinner("AI မြန်မာအသံ ပြုလုပ်နေပါသည်..."):
+                    voice_code = (
+                        "my-MM-ThihaNeural"
+                        if "Thiha" in voice_option
+                        else "my-MM-NilarNeural"
+                    )
 
-if st.button("AI အသံ ဖန်တီးမည်"):
-    if not translated_text:
-        st.warning("မြန်မာဘာသာပြန် စာသား ထည့်သွင်းပေးပါ။")
-    else:
-        voice_code = (
-            "my-MM-ThihaNeural"
-            if "Thiha" in voice_option
-            else "my-MM-NilarNeural"
-        )
-        with st.spinner("AI အသံ ဖန်တီးနေပါသည်..."):
-            temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            asyncio.run(
-                generate_audio_file(
-                    translated_text, voice_code, temp_audio.name
+                    async def gen_audio(text, v_code, out_p):
+                        communicate = edge_tts.Communicate(text, v_code)
+                        await communicate.save(out_p)
+
+                    audio_temp = tempfile.NamedTemporaryFile(
+                        delete=False, suffix=".mp3"
+                    )
+                    asyncio.run(
+                        gen_audio(script_text, voice_code, audio_temp.name)
+                    )
+                    st.session_state["audio_path"] = audio_temp.name
+                    st.session_state["video_path"] = video_path
+
+                st.success("Script နှင့် အသံဖိုင် ဖန်တီးပြီးပါပြီ။")
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+if "script_text" in st.session_state:
+    st.subheader("📝 ထွက်ရှိလာသော Recap Script")
+    st.text_area("Burmese Script", value=st.session_state["script_text"], height=200)
+
+    # Step 3: Process Video & Lip Sync / Copyright Adjust
+    st.header("Step 3: အသံ/ရုပ် ကိုက်ညီအောင် ညှိခြင်းနှင့် Copyright ပြင်ဆင်ခြင်း")
+
+    if st.button("🎬 ဗီဒီယို အပြီးသတ် Render ပြုလုပ်မည်"):
+        with st.spinner(
+            "ဗီဒီယိုနှင့် အသံကို ချိန်ညှိ၍ Anti-Copyright Filter များ ထည့်သွင်းနေပါသည်..."
+        ):
+            try:
+                video_clip = VideoFileClip(st.session_state["video_path"])
+                audio_clip = AudioFileClip(st.session_state["audio_path"])
+
+                # Anti-Copyright 1: Mirror Flip
+                if enable_flip:
+                    video_clip = video_clip.fx(vfx.mirror_x)
+
+                # Anti-Copyright 2: Speed up slightly
+                if enable_speed:
+                    video_clip = video_clip.fx(vfx.speedx, 1.05)
+
+                # Audio & Video Sync: Adjust video duration to match audio
+                video_duration = video_clip.duration
+                audio_duration = audio_clip.duration
+
+                speed_factor = video_duration / audio_duration
+                final_video = video_clip.fx(vfx.speedx, speed_factor)
+
+                # Merge Audio and Video
+                final_video = final_video.set_audio(audio_clip)
+
+                output_path = tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".mp4"
+                ).name
+                final_video.write_videofile(
+                    output_path,
+                    codec="libx264",
+                    audio_codec="aac",
+                    fps=24,
+                    verbose=False,
+                    logger=None,
                 )
-            )
-            st.session_state["audio_path"] = temp_audio.name
-            st.audio(temp_audio.name, format="audio/mp3")
-            st.success("အသံဖိုင် ဖန်တီးပြီးပါပြီ။")
 
-# Step 4: Result Export
-st.header("Step 4: ရလဒ် ထုတ်ယူခြင်း")
-if "audio_path" in st.session_state and uploaded_video:
-    st.info(
-        "ဗီဒီယိုနှင့် အသံကို ပေါင်းစပ်ရန် အသင့်ဖြစ်နေပါပြီ။ Download ရယူနိုင်ပါသည်။"
-    )
+                st.success("အပြီးသတ် Video Recap ဖိုင် ထွက်ရှိပါပြီ!")
+                st.video(output_path)
+
+                with open(output_path, "rb") as f:
+                    st.download_button(
+                        label="⬇️ Final Video Download ရယူပါ",
+                        data=f,
+                        file_name="movie_recap_final.mp4",
+                        mime="video/mp4",
+                    )
+
+            except Exception as e:
+                st.error(f"Video Processing Error: {e}")
