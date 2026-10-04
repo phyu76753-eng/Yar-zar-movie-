@@ -1,4 +1,5 @@
 streamlit
 google-generativeai
 edge-tts
-moviepy
+moviepy==1.0.3
+numpy<2.0.0
