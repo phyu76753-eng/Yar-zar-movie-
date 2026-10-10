@@ -155,12 +155,12 @@ if uploaded_video:
 
                 st.success("Script နှင့် အသံဖိုင် ဖန်တီးပြီးပါပြီ။")
 
-            except Exception:
-                # API key ပါတဲ့ error URL ကို app ပေါ်မှာ မပြစေရန်
-                st.error(
-                    "Gemini API ခေါ်ဆိုမှု မအောင်မြင်ပါ။ "
-                    "API key နဲ့ app settings ကို စစ်ပြီး ပြန်စမ်းပါ။"
-                )
+            except Exception as e:
+                error_text = str(e)
+                if api_key:
+                    error_text = error_text.replace(api_key, "[API_KEY HIDDEN]")
+                st.error(f"{type(e).__name__}: {error_text}")
+
 
 if "script_text" in st.session_state:
     st.subheader("📝 ထွက်ရှိလာသော Recap Script")
