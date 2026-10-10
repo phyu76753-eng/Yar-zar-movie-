@@ -13,11 +13,12 @@ import edge_tts
 import imageio_ffmpeg
 import pandas as pd
 import streamlit as st
-from google import genaifrom PIL import Image
+from google import genai
+from PIL import Image
 
 if not hasattr(Image, "ANTIALIAS"):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
-    
+
 from moviepy.editor import (
     AudioFileClip,
     CompositeAudioClip,
