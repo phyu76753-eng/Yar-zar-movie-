@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import os
 import random
 import re
@@ -85,8 +86,8 @@ def generate_with_fallback(client, contents):
     for index, model_name in enumerate(FALLBACK_MODELS):
         if index:
             st.warning(
-                f"{FALLBACK_MODELS[index - 1]} ачаалалтай байна. "
-                f"{model_name} model-оор үргэлжлүүлэн оролдож байна..."
+                f"{FALLBACK_MODELS[index - 1]} အလုပ်များနေပါသည်။ "
+                f"{model_name} model ဖြင့် ဆက်လက်ကြိုးစားနေပါသည်..."
             )
             time.sleep(random.uniform(1.0, 2.5))
 
@@ -105,69 +106,115 @@ def generate_with_fallback(client, contents):
 
 
 def extract_segments(client, video_path, video_duration):
-    """Ask Gemini to detect and transcribe speech in any language with timestamps."""
-    uploaded_file = client.files.upload(file=video_path)
+    """Transcribe the entire video's audio in short chunks with global timestamps."""
+    chunk_seconds = 45
+    source_clip = VideoFileClip(video_path)
+    if source_clip.audio is None:
+        source_clip.close()
+        raise ValueError("ဒီဗီဒီယိုဖိုင်မှာ အသံလမ်းကြောင်း မပါပါ။")
+
+    chunk_count = max(1, math.ceil(video_duration / chunk_seconds))
+    segments = []
+    progress = st.progress(0.0, text="ဗီဒီယိုအသံကို အပိုင်းလိုက်စစ်ဆေးနေပါသည်...")
+
     try:
-        started_at = time.monotonic()
-        while uploaded_file.state and uploaded_file.state.name == "PROCESSING":
-            if time.monotonic() - started_at > 600:
-                raise TimeoutError("ဗီဒီယို processing အချိန်ကြာလွန်းနေပါသည်။")
-            time.sleep(5)
-            uploaded_file = client.files.get(name=uploaded_file.name)
+        for chunk_index in range(chunk_count):
+            chunk_start = chunk_index * chunk_seconds
+            chunk_end = min(video_duration, chunk_start + chunk_seconds)
+            chunk_duration = chunk_end - chunk_start
 
-        if not uploaded_file.state or uploaded_file.state.name != "ACTIVE":
-            raise RuntimeError("Google က video ဖိုင်ကို ပြင်ဆင်မရပါ။")
+            audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            audio_temp.close()
+            uploaded_file = None
+            try:
+                audio_part = source_clip.audio.subclip(chunk_start, chunk_end)
+                audio_part.write_audiofile(
+                    audio_temp.name,
+                    fps=16000,
+                    nbytes=2,
+                    codec="pcm_s16le",
+                    logger=None,
+                )
 
-        prompt = f"""
-You are an accurate multilingual speech transcriber for a dubbing workflow.
-Listen to the uploaded video and identify the spoken language automatically.
-Transcribe all audible dialogue and narration in its original language; it may be any language, not only English.
-If speech is not intelligible but clearly readable subtitles are visible, transcribe those subtitles in their original language.
-Split the transcript into short, natural subtitle cues, usually about 2 to 7 seconds each.
-For every cue provide start and end timestamps in seconds from the beginning of the video.
-Keep cues chronological, do not invent dialogue, and preserve the original language and script.
-The video duration is approximately {video_duration:.2f} seconds.
-Return ONLY valid JSON in exactly this shape:
+                uploaded_file = client.files.upload(file=audio_temp.name)
+                started_at = time.monotonic()
+                while uploaded_file.state and uploaded_file.state.name == "PROCESSING":
+                    if time.monotonic() - started_at > 300:
+                        raise TimeoutError("အသံအပိုင်းကို ပြင်ဆင်ချိန် များလွန်းနေပါသည်။")
+                    time.sleep(3)
+                    uploaded_file = client.files.get(name=uploaded_file.name)
+
+                if not uploaded_file.state or uploaded_file.state.name != "ACTIVE":
+                    raise RuntimeError("Google က အသံအပိုင်းကို ပြင်ဆင်မရပါ။")
+
+                prompt = f"""
+You are an accurate multilingual speech transcriber for video dubbing.
+Listen to this audio and identify the language automatically.
+Transcribe all audible speech in its original language and script; it may be any language.
+Split it into short subtitle cues, usually 2 to 7 seconds each.
+Return start and end timestamps in seconds relative to the beginning of this audio clip.
+The clip is {chunk_duration:.2f} seconds long. Keep cues chronological and do not invent speech.
+Return ONLY valid JSON in this exact shape:
 {{"segments":[{{"start":0.0,"end":2.5,"text":"Original spoken words here"}}]}}
+If this clip contains no speech, return {{"segments":[]}}.
 No markdown fences or extra commentary.
 """
+                result = generate_with_fallback(
+                    client,
+                    [uploaded_file, prompt],
+                )
+                payload = parse_json_response(result.text)
+                raw_segments = payload.get("segments")
+                if not isinstance(raw_segments, list):
+                    raise ValueError("Gemini အဖြေမှာ segments စာရင်း မပါပါ။")
 
-        result = generate_with_fallback(
-            client,
-            [uploaded_file, prompt],
-        )
-        payload = parse_json_response(result.text)
-        raw_segments = payload.get("segments")
-        if not isinstance(raw_segments, list):
-            raise ValueError("Gemini အဖြေမှာ segments စာရင်း မပါပါ။")
+                for item in raw_segments:
+                    if not isinstance(item, dict):
+                        continue
+                    text = str(item.get("text", "")).strip()
+                    if not text:
+                        continue
+                    local_start = float(item.get("start", 0))
+                    local_end = float(item.get("end", 0))
+                    local_start = max(0.0, min(local_start, chunk_duration))
+                    local_end = min(
+                        chunk_duration,
+                        max(local_start + 0.15, local_end),
+                    )
+                    if local_start >= chunk_duration:
+                        continue
+                    segments.append(
+                        {
+                            "start": chunk_start + local_start,
+                            "end": chunk_start + local_end,
+                            "original_text": text,
+                        }
+                    )
+            finally:
+                if uploaded_file is not None:
+                    try:
+                        client.files.delete(name=uploaded_file.name)
+                    except Exception:
+                        pass
+                try:
+                    os.unlink(audio_temp.name)
+                except OSError:
+                    pass
 
-        segments = []
-        for item in raw_segments:
-            if not isinstance(item, dict):
-                continue
-            text = str(item.get("text", "")).strip()
-            if not text:
-                continue
-            start = float(item.get("start", 0))
-            end = float(item.get("end", 0))
-            start = max(0.0, min(start, video_duration))
-            end = min(video_duration, max(start + 0.15, end))
-            if start >= video_duration:
-                continue
-            segments.append({"start": start, "end": end, "original_text": text})
+            progress.progress(
+                (chunk_index + 1) / chunk_count,
+                text=f"အသံအပိုင်း {chunk_index + 1}/{chunk_count} ကို စစ်ဆေးပြီးပါပြီ",
+            )
 
         segments.sort(key=lambda row: row["start"])
         if not segments:
             raise ValueError(
-                "ဗီဒီယိုထဲမှာ ခွဲထုတ်လို့ရတဲ့ စကားသံ သို့မဟုတ် စာတန်း မတွေ့ပါ။ "
-                "အသံကြားရပြီး စကားပြောပါဝင်သော ဗီဒီယိုကို စမ်းကြည့်ပါ။"
+                "ဗီဒီယိုရဲ့ အပိုင်းအားလုံးကို စစ်ပြီးပါပြီ၊ ဒါပေမယ့် စကားပြောသံ မတွေ့ပါ။ "
+                "အသံပါပြီး စကားပြောသံကြားရတဲ့ ဗီဒီယိုနဲ့ ထပ်စမ်းပါ။"
             )
         return segments
     finally:
-        try:
-            client.files.delete(name=uploaded_file.name)
-        except Exception:
-            pass
+        source_clip.close()
 
 
 def translate_segments(client, segments):
@@ -200,6 +247,35 @@ Input lines:
         translations.extend(str(line).strip() for line in batch_translations)
 
     return translations
+
+
+def format_srt_timestamp(seconds):
+    total_ms = max(0, int(round(float(seconds) * 1000)))
+    hours, remainder = divmod(total_ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    whole_seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
+
+
+def build_srt(rows, text_column, offset=0.0):
+    entries = []
+    for row in rows:
+        text = str(row.get(text_column, "")).strip()
+        if not text or text.lower() == "nan":
+            continue
+        start = max(0.0, float(row["Start (sec)"]) + offset)
+        end = max(start + 0.1, float(row["End (sec)"]) + offset)
+        entries.append((start, end, text))
+
+    entries.sort(key=lambda entry: entry[0])
+    blocks = []
+    for index, (start, end, text) in enumerate(entries, start=1):
+        blocks.append(
+            f"{index}\n"
+            f"{format_srt_timestamp(start)} --> {format_srt_timestamp(end)}\n"
+            f"{text}"
+        )
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 
 async def save_tts_audio(text, voice, rate, pitch, output_path):
@@ -348,6 +424,29 @@ if "dub_rows" in st.session_state:
         },
     )
 
+    subtitle_rows = edited_rows.to_dict(orient="records")
+    original_srt = build_srt(subtitle_rows, "မူရင်းစာသား")
+    myanmar_srt = build_srt(
+        subtitle_rows,
+        "မြန်မာဘာသာပြန်",
+        offset=sync_offset,
+    )
+    srt_left, srt_right = st.columns(2)
+    with srt_left:
+        st.download_button(
+            "မူရင်းဘာသာ SRT ဒေါင်းလုဒ်",
+            data=original_srt.encode("utf-8-sig"),
+            file_name="original_subtitles.srt",
+            mime="text/plain",
+        )
+    with srt_right:
+        st.download_button(
+            "မြန်မာဘာသာ SRT ဒေါင်းလုဒ်",
+            data=myanmar_srt.encode("utf-8-sig"),
+            file_name="myanmar_subtitles.srt",
+            mime="text/plain",
+        )
+
     st.header("အဆင့် ၃ — အချိန်ကိုက် မြန်မာအသံဖန်တီးပါ")
     if st.button("မြန်မာအသံတင်ပြီး ဗီဒီယိုထုတ်မည်", type="primary"):
         if not api_key:
@@ -397,7 +496,34 @@ if "dub_rows" in st.session_state:
                         )
                     )
 
-                    audio_clip = AudioFileClip(audio_temp.name)
+                    # Edge TTS нь mono MP3 гаргадаг. MoviePy 1.x-д mono clip-үүдийг
+                    # шууд нийлүүлэхэд audio timeline буруу урттай болохоос сэргийлж stereo болгоно.
+                    stereo_temp = tempfile.NamedTemporaryFile(
+                        delete=False,
+                        suffix=".wav",
+                    )
+                    stereo_temp.close()
+                    generated_audio_paths.append(stereo_temp.name)
+                    subprocess.run(
+                        [
+                            imageio_ffmpeg.get_ffmpeg_exe(),
+                            "-y",
+                            "-i",
+                            audio_temp.name,
+                            "-ac",
+                            "2",
+                            "-ar",
+                            "44100",
+                            "-c:a",
+                            "pcm_s16le",
+                            stereo_temp.name,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    audio_clip = AudioFileClip(stereo_temp.name)
                     base_audio_clips.append(audio_clip)
                     cue_duration = max(0.2, end - start)
 
@@ -421,105 +547,4 @@ if "dub_rows" in st.session_state:
                     if flip_video
                     else source_video
                 )
-                video_for_render = video_for_render.without_audio()
-
-                composite_audio = CompositeAudioClip(timeline_audio_clips)
-                composite_audio = composite_audio.set_duration(video_for_render.duration)
-
-                audio_for_video = composite_audio
-                if clarity_boost > 0:
-                    raw_mix = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-                    raw_mix.close()
-                    eq_mix = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-                    eq_mix.close()
-                    generated_audio_paths.extend([raw_mix.name, eq_mix.name])
-
-                    composite_audio.write_audiofile(
-                        raw_mix.name,
-                        fps=44100,
-                        nbytes=2,
-                        codec="pcm_s16le",
-                        logger=None,
-                    )
-                    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-                    eq_filter = (
-                        f"equalizer=f=3000:t=q:w=1:g={clarity_boost}"
-                    )
-                    subprocess.run(
-                        [
-                            ffmpeg_path,
-                            "-y",
-                            "-i",
-                            raw_mix.name,
-                            "-af",
-                            eq_filter,
-                            "-c:a",
-                            "pcm_s16le",
-                            eq_mix.name,
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                    audio_for_video = AudioFileClip(eq_mix.name)
-                    base_audio_clips.append(audio_for_video)
-                    audio_for_video = audio_for_video.set_duration(
-                        video_for_render.duration
-                    )
-
-                final_video = video_for_render.set_audio(audio_for_video)
-
-                output_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-                output_temp.close()
-                final_video.write_videofile(
-                    output_temp.name,
-                    codec="libx264",
-                    audio_codec="aac",
-                    fps=video_for_render.fps or 24,
-                    preset="medium",
-                    threads=2,
-                    logger=None,
-                )
-
-                st.session_state["dub_output_path"] = output_temp.name
-                st.success("အချိန်ကိုက် မြန်မာအသံပါသော ဗီဒီယို ပြီးပါပြီ။")
-            except Exception as exc:
-                st.error(safe_error_message(exc, api_key))
-            finally:
-                if final_video is not None:
-                    try:
-                        final_video.close()
-                    except Exception:
-                        pass
-                if source_video is not None:
-                    try:
-                        source_video.close()
-                    except Exception:
-                        pass
-                if composite_audio is not None:
-                    try:
-                        composite_audio.close()
-                    except Exception:
-                        pass
-                for clip in base_audio_clips:
-                    try:
-                        clip.close()
-                    except Exception:
-                        pass
-                for path in generated_audio_paths:
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
-
-if "dub_output_path" in st.session_state:
-    output_path = st.session_state["dub_output_path"]
-    if os.path.exists(output_path):
-        st.video(output_path)
-        with open(output_path, "rb") as output_file:
-            st.download_button(
-                label="⬇️ Dubbing ဗီဒီယိုကို ဒေါင်းလုဒ်လုပ်ပါ",
-                data=output_file,
-                file_name="myanmar_dubbed_video.mp4",
-                mime="video/mp4",
-        )
+                v
