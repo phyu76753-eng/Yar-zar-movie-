@@ -14,11 +14,7 @@ st.title("🎬 Pro AI Movie Recap & Dubbing Tool")
 
 # Sidebar Settings
 st.sidebar.header("⚙️ App Settings")
-# Streamlit Secrets သို့မဟုတ် Sidebar မှ API Key ကို ယူခြင်း
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-else:
-    api_key = st.sidebar.text_input("Gemini API Key ထည့်ပါ")
+api_key = st.sidebar.text_input("Gemini API Key ထည့်ပါ", type="password")
 
 voice_option = st.sidebar.selectbox(
     "AI မြန်မာအသံ ရွေးပါ",
