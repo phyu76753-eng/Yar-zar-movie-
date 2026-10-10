@@ -1,20 +1,29 @@
 import asyncio
 import os
 import tempfile
-import google.generativeai as genai
+import time
+
+from google import genai
 import numpy as np
 import streamlit as st
 import edge_tts
 from moviepy.editor import AudioFileClip, VideoFileClip, vfx
 
+
 st.set_page_config(
-    page_title="Pro AI Movie Recapper", layout="wide", page_icon="🎬"
+    page_title="Pro AI Movie Recapper",
+    layout="wide",
+    page_icon="🎬"
 )
+
 st.title("🎬 Pro AI Movie Recap & Dubbing Tool")
 
 # Sidebar Settings
 st.sidebar.header("⚙️ App Settings")
-api_key = st.sidebar.text_input("Gemini API Key ထည့်ပါ", type="password")
+api_key = st.sidebar.text_input(
+    "Gemini API Key ထည့်ပါ",
+    type="password"
+)
 
 voice_option = st.sidebar.selectbox(
     "AI မြန်မာအသံ ရွေးပါ",
@@ -34,13 +43,20 @@ recap_style = st.sidebar.selectbox(
 )
 
 st.sidebar.subheader("🛡️ Anti-Copyright (မူပိုင်ခွင့် ကာကွယ်ရေး)")
-enable_flip = st.sidebar.checkbox("Video ဘယ်/ညာ မှန်တုံ့ပြန် ပြောင်းမည် (Flip)", value=True)
-enable_speed = st.sidebar.checkbox("Speed 1.05x အနည်းငယ် မြှင့်မည်", value=True)
+enable_flip = st.sidebar.checkbox(
+    "Video ဘယ်/ညာ မှန်တုံ့ပြန် ပြောင်းမည် (Flip)",
+    value=True
+)
+enable_speed = st.sidebar.checkbox(
+    "Speed 1.05x အနည်းငယ် မြှင့်မည်",
+    value=True
+)
 
 # Step 1: Upload Video
 st.header("Step 1: Video တင်ပါ")
 uploaded_video = st.file_uploader(
-    "Recap ပြုလုပ်လိုသည့် Video ဖိုင် ရွေးပါ (.mp4)", type=["mp4", "mov"]
+    "Recap ပြုလုပ်လိုသည့် Video ဖိုင် ရွေးပါ (.mp4)",
+    type=["mp4", "mov"]
 )
 
 if uploaded_video:
@@ -54,18 +70,40 @@ if uploaded_video:
             st.error("Sidebar တွင် Gemini API Key အရင်ထည့်သွင်းပေးပါ။")
         else:
             try:
-                genai.configure(api_key=api_key)
+                # Gemini API client အသစ်
+                client = genai.Client(api_key=api_key)
 
                 # Save video to temp file
                 with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".mp4"
+                    delete=False,
+                    suffix=".mp4"
                 ) as tmp_v:
                     tmp_v.write(uploaded_video.read())
                     video_path = tmp_v.name
 
-                with st.spinner("AI က ဗီဒီယိုကို လေ့လာပြီး Script ရေးသားနေပါသည်..."):
-                    video_file = genai.upload_file(path=video_path)
-                    model = genai.GenerativeModel("gemini-2.5-flash")
+                with st.spinner(
+                    "AI က ဗီဒီယိုကို လေ့လာပြီး Script ရေးသားနေပါသည်..."
+                ):
+                    # Upload video to Gemini
+                    video_file = client.files.upload(file=video_path)
+
+                    # Wait until Gemini finishes processing the video
+                    while (
+                        video_file.state
+                        and video_file.state.name == "PROCESSING"
+                    ):
+                        time.sleep(5)
+                        video_file = client.files.get(
+                            name=video_file.name
+                        )
+
+                    if (
+                        not video_file.state
+                        or video_file.state.name != "ACTIVE"
+                    ):
+                        raise RuntimeError(
+                            "Google က video ဖိုင်ကို ပြင်ဆင်မရပါ။"
+                        )
 
                     prompt = f"""
                     You are a professional movie recap creator. Watch and listen to this video.
@@ -73,14 +111,18 @@ if uploaded_video:
                     Keep the script clear, natural, and engaging in modern spoken Burmese.
                     """
 
-                    response = model.generate_content([video_file, prompt])
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=[video_file, prompt],
+                    )
+
                     script_text = response.text
                     st.session_state["script_text"] = script_text
 
                     # Delete uploaded file from Gemini server
                     try:
-                        genai.delete_file(video_file.name)
-                    except:
+                        client.files.delete(name=video_file.name)
+                    except Exception:
                         pass
 
                 # TTS Generation
@@ -96,33 +138,55 @@ if uploaded_video:
                         await communicate.save(out_p)
 
                     audio_temp = tempfile.NamedTemporaryFile(
-                        delete=False, suffix=".mp3"
+                        delete=False,
+                        suffix=".mp3"
                     )
+
                     asyncio.run(
-                        gen_audio(script_text, voice_code, audio_temp.name)
+                        gen_audio(
+                            script_text,
+                            voice_code,
+                            audio_temp.name
+                        )
                     )
+
                     st.session_state["audio_path"] = audio_temp.name
                     st.session_state["video_path"] = video_path
 
                 st.success("Script နှင့် အသံဖိုင် ဖန်တီးပြီးပါပြီ။")
 
-            except Exception as e:
-                st.error(f"Error: {e}")
+            except Exception:
+                # API key ပါတဲ့ error URL ကို app ပေါ်မှာ မပြစေရန်
+                st.error(
+                    "Gemini API ခေါ်ဆိုမှု မအောင်မြင်ပါ။ "
+                    "API key နဲ့ app settings ကို စစ်ပြီး ပြန်စမ်းပါ။"
+                )
 
 if "script_text" in st.session_state:
     st.subheader("📝 ထွက်ရှိလာသော Recap Script")
-    st.text_area("Burmese Script", value=st.session_state["script_text"], height=200)
+    st.text_area(
+        "Burmese Script",
+        value=st.session_state["script_text"],
+        height=200
+    )
 
     # Step 3: Process Video & Lip Sync / Copyright Adjust
-    st.header("Step 3: အသံ/ရုပ် ကိုက်ညီအောင် ညှိခြင်းနှင့် Copyright ပြင်ဆင်ခြင်း")
+    st.header(
+        "Step 3: အသံ/ရုပ် ကိုက်ညီအောင် ညှိခြင်းနှင့် Copyright ပြင်ဆင်ခြင်း"
+    )
 
     if st.button("🎬 ဗီဒီယို အပြီးသတ် Render ပြုလုပ်မည်"):
         with st.spinner(
-            "ဗီဒီယိုနှင့် အသံကို ချိန်ညှိ၍ Anti-Copyright Filter များ ထည့်သွင်းနေပါသည်..."
+            "ဗီဒီယိုနှင့် အသံကို ချိန်ညှိ၍ Anti-Copyright Filter များ "
+            "ထည့်သွင်းနေပါသည်..."
         ):
             try:
-                video_clip = VideoFileClip(st.session_state["video_path"])
-                audio_clip = AudioFileClip(st.session_state["audio_path"])
+                video_clip = VideoFileClip(
+                    st.session_state["video_path"]
+                )
+                audio_clip = AudioFileClip(
+                    st.session_state["audio_path"]
+                )
 
                 # Anti-Copyright 1: Mirror Flip
                 if enable_flip:
@@ -137,14 +201,19 @@ if "script_text" in st.session_state:
                 audio_duration = audio_clip.duration
 
                 speed_factor = video_duration / audio_duration
-                final_video = video_clip.fx(vfx.speedx, speed_factor)
+                final_video = video_clip.fx(
+                    vfx.speedx,
+                    speed_factor
+                )
 
                 # Merge Audio and Video
                 final_video = final_video.set_audio(audio_clip)
 
                 output_path = tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".mp4"
+                    delete=False,
+                    suffix=".mp4"
                 ).name
+
                 final_video.write_videofile(
                     output_path,
                     codec="libx264",
