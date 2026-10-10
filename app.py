@@ -27,10 +27,10 @@ st.set_page_config(
     layout="wide",
     page_icon="🎬",
 )
-st.title("🎬 AI Movie Dubbing — English to Myanmar")
+st.title("🎬 AI Movie Dubbing — Any Language to Myanmar")
 st.write(
-    "ဗီဒီယိုထဲက အင်္ဂလိပ်စကားကို အလိုအလျောက် စာသားနှင့်အချိန်မှတ်တမ်း ထုတ်ယူ၊ "
-    "မြန်မာဘာသာပြန်ပြီး စာကြောင်းတစ်ကြောင်းချင်း အသံတင်ပေးပါသည်။"
+    "ဗီဒီယိုထဲက မည်သည့်ဘာသာစကားဖြင့် ပြောထားသော စကားကိုမဆို အလိုအလျောက် "
+    "စာသားနှင့်အချိန်မှတ်တမ်း ထုတ်ယူ၊ မြန်မာဘာသာပြန်ပြီး စာကြောင်းတစ်ကြောင်းချင်း အသံတင်ပေးပါသည်။"
 )
 
 
@@ -61,7 +61,7 @@ def safe_error_message(exc, api_key):
 
 
 def extract_segments(client, video_path, video_duration):
-    """Ask Gemini to transcribe English speech with approximate timestamps."""
+    """Ask Gemini to detect and transcribe speech in any language with timestamps."""
     uploaded_file = client.files.upload(file=video_path)
     try:
         started_at = time.monotonic()
@@ -75,15 +75,16 @@ def extract_segments(client, video_path, video_duration):
             raise RuntimeError("Google က video ဖိုင်ကို ပြင်ဆင်မရပါ။")
 
         prompt = f"""
-You are an accurate English speech transcriber for a dubbing workflow.
-Listen to the uploaded video and transcribe the audible English dialogue/narration.
-If clearly readable English subtitles are visible but speech is not intelligible, you may use those subtitles.
+You are an accurate multilingual speech transcriber for a dubbing workflow.
+Listen to the uploaded video and identify the spoken language automatically.
+Transcribe all audible dialogue and narration in its original language; it may be any language, not only English.
+If speech is not intelligible but clearly readable subtitles are visible, transcribe those subtitles in their original language.
 Split the transcript into short, natural subtitle cues, usually about 2 to 7 seconds each.
 For every cue provide start and end timestamps in seconds from the beginning of the video.
-Keep cues chronological, do not invent dialogue, and keep the words in English.
+Keep cues chronological, do not invent dialogue, and preserve the original language and script.
 The video duration is approximately {video_duration:.2f} seconds.
 Return ONLY valid JSON in exactly this shape:
-{{"segments":[{{"start":0.0,"end":2.5,"text":"English words here"}}]}}
+{{"segments":[{{"start":0.0,"end":2.5,"text":"Original spoken words here"}}]}}
 No markdown fences or extra commentary.
 """
 
@@ -109,13 +110,13 @@ No markdown fences or extra commentary.
             end = min(video_duration, max(start + 0.15, end))
             if start >= video_duration:
                 continue
-            segments.append({"start": start, "end": end, "english": text})
+            segments.append({"start": start, "end": end, "original_text": text})
 
         segments.sort(key=lambda row: row["start"])
         if not segments:
             raise ValueError(
-                "ဗီဒီယိုထဲမှာ ခွဲထုတ်လို့ရတဲ့ အင်္ဂလိပ်စကား မတွေ့ပါ။ "
-                "အသံပါသော ဗီဒီယိုကို စမ်းကြည့်ပါ။"
+                "ဗီဒီယိုထဲမှာ ခွဲထုတ်လို့ရတဲ့ စကားသံ သို့မဟုတ် စာတန်း မတွေ့ပါ။ "
+                "အသံကြားရပြီး စကားပြောပါဝင်သော ဗီဒီယိုကို စမ်းကြည့်ပါ။"
             )
         return segments
     finally:
@@ -132,10 +133,10 @@ def translate_segments(client, segments):
 
     for batch_start in range(0, len(segments), batch_size):
         batch = segments[batch_start : batch_start + batch_size]
-        source_lines = [row["english"] for row in batch]
+        source_lines = [row["original_text"] for row in batch]
         prompt = f"""
-You are a professional English-to-Myanmar video dubbing translator.
-Translate every input line into natural, concise spoken Burmese written in Myanmar script.
+You are a professional multilingual-to-Myanmar video dubbing translator.
+Translate every input line, regardless of its original language, into natural, concise spoken Burmese written in Myanmar script.
 Do not output English, phonetic guides, numbering, explanations, or extra text.
 Preserve meaning and names naturally. Keep the same number and order of lines.
 Return ONLY valid JSON with one key called translations and an array of strings.
@@ -191,7 +192,7 @@ voice_pitch = st.sidebar.slider(
     max_value=20,
     value=0,
     step=1,
-    help="အသံны өнгийг намсгаж эсвэл өндөрсгөнө။",
+    help="အသံလေသံကို အနိမ့် သို့မဟုတ် အမြင့် ပြောင်းပေးပါတယ်။",
 )
 audio_volume = st.sidebar.slider(
     "အသံအတိုးအကျယ်",
@@ -225,7 +226,7 @@ flip_video = st.sidebar.checkbox("ဗီဒီယိုကို ဘယ်/ည�
 
 
 # ---------- Upload and analyze ----------
-st.header("အဆင့် ၁ — ဗီဒီယိုတင်ပြီး အင်္ဂလိပ်စာသားထုတ်ယူပါ")
+st.header("အဆင့် ၁ — ဗီဒီယိုတင်ပြီး မူရင်းစကားသံထုတ်ယူပါ")
 uploaded_video = st.file_uploader(
     "ဗီဒီယိုဖိုင်ရွေးပါ",
     type=["mp4", "mov", "m4v"],
@@ -234,7 +235,7 @@ uploaded_video = st.file_uploader(
 if uploaded_video:
     st.video(uploaded_video)
 
-if uploaded_video and st.button("အင်္ဂလိပ်စကားထုတ်ယူပြီး မြန်မာလိုဘာသာပြန်မည်", type="primary"):
+if uploaded_video and st.button("မူရင်းစကားသံထုတ်ယူပြီး မြန်မာလိုဘာသာပြန်မည်", type="primary"):
     if not api_key:
         st.error("Sidebar မှာ Gemini API Key ထည့်ပါ။")
     else:
@@ -258,7 +259,7 @@ if uploaded_video and st.button("အင်္ဂလိပ်စကားထု�
                     video_duration,
                 )
 
-            with st.spinner("အင်္ဂလိပ်စာကြောင်းတွေကို မြန်မာလို ဘာသာပြန်နေပါသည်..."):
+            with st.spinner("မူရင်းစကားတွေကို မြန်မာလို ဘာသာပြန်နေပါသည်..."):
                 translations = translate_segments(client, english_segments)
 
             rows = []
@@ -267,7 +268,7 @@ if uploaded_video and st.button("အင်္ဂလိပ်စကားထု�
                     {
                         "Start (sec)": round(item["start"], 2),
                         "End (sec)": round(item["end"], 2),
-                        "English": item["english"],
+                        "မူရင်းစာသား": item["original_text"],
                         "မြန်မာဘာသာပြန်": translation,
                     }
                 )
@@ -301,7 +302,7 @@ if "dub_rows" in st.session_state:
         column_config={
             "Start (sec)": st.column_config.NumberColumn(min_value=0.0, step=0.1),
             "End (sec)": st.column_config.NumberColumn(min_value=0.0, step=0.1),
-            "English": st.column_config.TextColumn(),
+            "မူရင်းစာသား": st.column_config.TextColumn(),
             "မြန်မာဘာသာပြန်": st.column_config.TextColumn(),
         },
     )
@@ -480,4 +481,4 @@ if "dub_output_path" in st.session_state:
                 data=output_file,
                 file_name="myanmar_dubbed_video.mp4",
                 mime="video/mp4",
-            )
+        )
