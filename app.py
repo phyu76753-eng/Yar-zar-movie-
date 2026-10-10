@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import random
 import re
 import subprocess
 import tempfile
@@ -21,6 +22,11 @@ from moviepy.editor import (
 
 
 MODEL_NAME = "gemini-3.8-flash"
+FALLBACK_MODELS = [
+    MODEL_NAME,
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+]
 
 st.set_page_config(
     page_title="AI Myanmar Video Dubbing",
@@ -60,6 +66,44 @@ def safe_error_message(exc, api_key):
     return f"{type(exc).__name__}: {message}"
 
 
+def generate_with_fallback(client, contents):
+    """Try the main model, then other stable Flash models on transient failures."""
+    last_error = None
+    retry_markers = (
+        "503",
+        "UNAVAILABLE",
+        "500",
+        "INTERNAL",
+        "502",
+        "504",
+        "429",
+        "RESOURCE_EXHAUSTED",
+        "404",
+        "NOT_FOUND",
+    )
+
+    for index, model_name in enumerate(FALLBACK_MODELS):
+        if index:
+            st.warning(
+                f"{FALLBACK_MODELS[index - 1]} ачаалалтай байна. "
+                f"{model_name} model-оор үргэлжлүүлэн оролдож байна..."
+            )
+            time.sleep(random.uniform(1.0, 2.5))
+
+        try:
+            return client.models.generate_content(
+                model=model_name,
+                contents=contents,
+            )
+        except Exception as exc:
+            last_error = exc
+            error_text = str(exc).upper()
+            if not any(marker in error_text for marker in retry_markers):
+                raise
+
+    raise last_error
+
+
 def extract_segments(client, video_path, video_duration):
     """Ask Gemini to detect and transcribe speech in any language with timestamps."""
     uploaded_file = client.files.upload(file=video_path)
@@ -88,9 +132,9 @@ Return ONLY valid JSON in exactly this shape:
 No markdown fences or extra commentary.
 """
 
-        result = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[uploaded_file, prompt],
+        result = generate_with_fallback(
+            client,
+            [uploaded_file, prompt],
         )
         payload = parse_json_response(result.text)
         raw_segments = payload.get("segments")
@@ -143,10 +187,7 @@ Return ONLY valid JSON with one key called translations and an array of strings.
 Input lines:
 {json.dumps(source_lines, ensure_ascii=False)}
 """
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-        )
+        response = generate_with_fallback(client, prompt)
         parsed = parse_json_response(response.text)
         batch_translations = parsed.get("translations")
         if not isinstance(batch_translations, list):
