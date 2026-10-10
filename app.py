@@ -546,4 +546,140 @@ if "dub_rows" in st.session_state:
                         text=f"အသံဖန်တီးနေသည် — {index + 1}/{len(usable_rows)}",
                     )
 
-                source_video = VideoFileClip(st.session_state[
+                            source_video = VideoFileClip(st.session_state["dub_video_path"])
+                video_for_render = (
+                    source_video.fx(vfx.mirror_x)
+                    if flip_video
+                    else source_video
+                )
+                if cloud_light_render and video_for_render.h > 720:
+                    video_for_render = video_for_render.resize(height=720)
+                video_for_render = video_for_render.without_audio()
+                render_fps = min(float(video_for_render.fps or 24), 24) if cloud_light_render else (video_for_render.fps or 24)
+
+                composite_audio = CompositeAudioClip(timeline_audio_clips)
+                composite_audio = composite_audio.set_duration(video_for_render.duration)
+
+                audio_for_video = composite_audio
+                if clarity_boost > 0:
+                    raw_mix = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                    raw_mix.close()
+                    eq_mix = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                    eq_mix.close()
+                    generated_audio_paths.extend([raw_mix.name, eq_mix.name])
+
+                    composite_audio.write_audiofile(
+                        raw_mix.name,
+                        fps=44100,
+                        nbytes=2,
+                        codec="pcm_s16le",
+                        logger=None,
+                    )
+                    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+                    eq_filter = (
+                        f"equalizer=f=3000:t=q:w=1:g={clarity_boost}"
+                    )
+                    subprocess.run(
+                        [
+                            ffmpeg_path,
+                            "-y",
+                            "-i",
+                            raw_mix.name,
+                            "-af",
+                            eq_filter,
+                            "-c:a",
+                            "pcm_s16le",
+                            eq_mix.name,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    audio_for_video = AudioFileClip(eq_mix.name)
+                    base_audio_clips.append(audio_for_video)
+                    audio_for_video = audio_for_video.set_duration(
+                        video_for_render.duration
+                    )
+
+                final_video = video_for_render.set_audio(audio_for_video)
+
+                audio_output = tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=".mp3",
+                )
+                audio_output.close()
+                audio_for_video.write_audiofile(
+                    audio_output.name,
+                    fps=44100,
+                    nbytes=2,
+                    codec="libmp3lame",
+                    bitrate="192k",
+                    logger=None,
+                )
+                st.session_state["dub_audio_path"] = audio_output.name
+
+                output_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+                output_temp.close()
+                final_video.write_videofile(
+                    output_temp.name,
+                    codec="libx264",
+                    audio_codec="aac",
+                    fps=render_fps,
+                    preset="ultrafast",
+                    threads=1,
+                    logger=None,
+                )
+
+                st.session_state["dub_output_path"] = output_temp.name
+                st.success("အချိန်ကိုက် မြန်မာအသံပါသော ဗီဒီယို ပြီးပါပြီ။")
+            except Exception as exc:
+                st.error(safe_error_message(exc, api_key))
+            finally:
+                if final_video is not None:
+                    try:
+                        final_video.close()
+                    except Exception:
+                        pass
+                if source_video is not None:
+                    try:
+                        source_video.close()
+                    except Exception:
+                        pass
+                if composite_audio is not None:
+                    try:
+                        composite_audio.close()
+                    except Exception:
+                        pass
+                for clip in base_audio_clips:
+                    try:
+                        clip.close()
+                    except Exception:
+                        pass
+                for path in generated_audio_paths:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+
+if "dub_audio_path" in st.session_state:
+    audio_output_path = st.session_state["dub_audio_path"]
+    if os.path.exists(audio_output_path):
+        with open(audio_output_path, "rb") as audio_file:
+            st.download_button(
+                "သီးခြားမြန်မာအသံ MP3 ဒေါင်းလုဒ်",
+                data=audio_file,
+                file_name="myanmar_dubbed_audio.mp3",
+                mime="audio/mpeg",
+            )
+
+if "dub_output_path" in st.session_state:
+    output_path = st.session_state["dub_output_path"]
+    if os.path.exists(output_path):
+        st.video(output_path)
+        with open(output_path, "rb") as output_file:
+            st.download_button(
+                label="⬇️ Dubbing ဗီဒီယိုကို ဒေါင်းလုဒ်လုပ်ပါ",
+                data=output_file,
+                file_name="myanmar_dubbed_video.mp4",
+                mime="video/mp4",
+            )
