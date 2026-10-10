@@ -546,4 +546,4 @@ if "dub_rows" in st.session_state:
                         text=f"အသံဖန်တီးနေသည် — {index + 1}/{len(usable_rows)}",
                     )
 
-                source_video = VideoFileClip(st.session_state["dub_video_path"])
+                source_video = VideoFileClip(st.session_state[
