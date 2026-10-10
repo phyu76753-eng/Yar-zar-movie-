@@ -340,6 +340,11 @@ fit_to_cue = st.sidebar.checkbox(
     help="ဘာသာပြန်စာကြောင်းရှည်ပါက စကားပြောသံကို အနည်းငယ်မြန်စေနိုင်ပါတယ်။",
 )
 flip_video = st.sidebar.checkbox("ဗီဒီယိုကို ဘယ်/ညာလှန်မည်", value=False)
+cloud_light_render = st.sidebar.checkbox(
+    "Cloud CPU လျှော့ရန် 720p / 24fps ашигမည်",
+    value=True,
+    help="Streamlit Cloud တွင် render ကို ပိုမြန်စေရန် resolution နှင့် frame rate ကို လျှော့ပေးပါတယ်။",
+)
 
 
 # ---------- Upload and analyze ----------
@@ -541,10 +546,4 @@ if "dub_rows" in st.session_state:
                         text=f"အသံဖန်တီးနေသည် — {index + 1}/{len(usable_rows)}",
                     )
 
-                source_video = VideoFileClip(st.session_state["dub_video_path"])
-                video_for_render = (
-                    source_video.fx(vfx.mirror_x)
-                    if flip_video
-                    else source_video
-                )
-                v
+                source_video = VideoFileClip(st.session_state[
