@@ -22,6 +22,7 @@ if not hasattr(Image, "ANTIALIAS"):
 from moviepy.editor import (
     AudioFileClip,
     CompositeAudioClip,
+    CompositeVideoClip,
     VideoFileClip,
     vfx,
 )
@@ -257,8 +258,7 @@ Input lines:
 def format_srt_timestamp(seconds):
     total_ms = max(0, int(round(float(seconds) * 1000)))
     hours, remainder = divmod(total_ms, 3_600_000)
-    minutes, remainder = divmod(remainder, 60_000)
-    whole_seconds, milliseconds = divmod(remainder, 1000)
+    minutes, remainder = divmod(remainder, 60_000)    whole_seconds, milliseconds = divmod(remainder, 1000)
     return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
 
 
@@ -300,14 +300,7 @@ voice_option = st.sidebar.selectbox(
     "မြန်မာအသံ",
     ["my-MM-ThihaNeural (Male)", "my-MM-NilarNeural (Female)"],
 )
-voice_rate = st.sidebar.slider(
-    "အသံပြောနှုန်း (%)",
-    min_value=-30,
-    max_value=50,
-    value=0,
-    step=5,
-    help="အပေါင်းတန်ဖိုးက ပိုမြန်၊ အနုတ်တန်ဖိုးက ပိုနှေးစေပါတယ်။",
-)
+voice_rate = 0
 voice_pitch = st.sidebar.slider(
     "အသံလေသံ အနိမ့်/အမြင့် (Hz)",
     min_value=-20,
@@ -331,25 +324,7 @@ clarity_boost = st.sidebar.slider(
     step=1,
     help="2.5–3 kHz အသံပိုင်းကို နည်းနည်းမြှင့်ပေးပါမယ်။ 0 ဆို EQ မထည့်ပါ။",
 )
-sync_offset = st.sidebar.slider(
-    "အသံစတင်ချိန်ညှိ (စက္ကန့်)",
-    min_value=-3.0,
-    max_value=3.0,
-    value=0.0,
-    step=0.1,
-    help="အပေါင်းဆို အသံကို နောက်ကျစေပြီး၊ အနုတ်ဆို အသံကို စောစေပါတယ်။",
-)
-fit_to_cue = st.sidebar.checkbox(
-    "စာကြောင်းအသံကို subtitle အချိန်အတွင်း အံဝင်အောင် အရှိန်မြှင့်မည်",
-    value=True,
-    help="ဘာသာပြန်စာကြောင်းရှည်ပါက စကားပြောသံကို အနည်းငယ်မြန်စေနိုင်ပါတယ်။",
-)
-flip_video = st.sidebar.checkbox("ဗီဒီယိုကို ဘယ်/ညာလှန်မည်", value=False)
-cloud_light_render = st.sidebar.checkbox(
-    "Cloud CPU လျှော့ရန် 720p / 24fps ашигမည်",
-    value=True,
-    help="Streamlit Cloud တွင် render ကို ပိုမြန်စေရန် resolution နှင့် frame rate ကို လျှော့ပေးပါတယ်။",
-)
+sync_offset = 0.0
 
 
 # ---------- Upload and analyze ----------
@@ -397,6 +372,7 @@ if uploaded_video and st.button("မူရင်းစကားသံထုတ�
                         "End (sec)": round(item["end"], 2),
                         "မူရင်းစာသား": item["original_text"],
                         "မြန်မာဘာသာပြန်": translation,
+                        "Video speed (x)": 1.0,
                     }
                 )
 
@@ -418,11 +394,17 @@ if "dub_rows" in st.session_state:
     st.header("အဆင့် ၂ — စာသားနှင့်အချိန်ကို စစ်ဆေးပြင်ဆင်ပါ")
     st.caption(
         "Gemini က အချိန်မှတ်တမ်းကို အလိုအလျောက် ခန့်မှန်းပေးပါမယ်။ "
-        "ပိုတိကျစေရန် Start/End အချိန်နှင့် ဘာသာပြန်စာသားကို ဒီနေရာမှာ ပြင်နိုင်ပါတယ်။"
+        "Start/End အချိန်၊ စာသားနှင့် Video speed ကို ဒီနေရာမှာ ပြင်နိုင်ပါတယ်။ "
+        "Video speed 1.0x ဆိုရင် ဗီဒီယိုအပိုင်းကို မြန်မာအသံဖိုင်ရဲ့ ကြာချိန်နဲ့ အလိုအလျောက်ကိုက်စေပါတယ်။ "
+        "0.8x က ဗီဒီယိုပိုနှေး၊ 1.2x က ပိုမြန်စေပါတယ်။ စာသားနဲ့ အသံပြောနှုန်းကို မပြောင်းပါ။ "
+        "အသံကြာချိန်က နောက်စာကြောင်းစချိန်ထက် ကျော်နေရင် ရုပ်ပုံနှစ်ပိုင်း ထပ်နိုင်ပါတယ်။"
     )
 
+    subtitle_df = pd.DataFrame(st.session_state["dub_rows"])
+    if "Video speed (x)" not in subtitle_df:
+        subtitle_df["Video speed (x)"] = 1.0
     edited_rows = st.data_editor(
-        pd.DataFrame(st.session_state["dub_rows"]),
+        subtitle_df,
         num_rows="dynamic",
         use_container_width=True,
         key="dub_subtitle_editor",
@@ -431,6 +413,13 @@ if "dub_rows" in st.session_state:
             "End (sec)": st.column_config.NumberColumn(min_value=0.0, step=0.1),
             "မူရင်းစာသား": st.column_config.TextColumn(),
             "မြန်မာဘာသာပြန်": st.column_config.TextColumn(),
+            "Video speed (x)": st.column_config.NumberColumn(
+                min_value=0.5,
+                max_value=2.0,
+                step=0.1,
+                format="%.1f",
+                help="1.0x တွင် ဗီဒီယိုကို အသံကြာချိန်နှင့် အလိုအလျောက်ညှိသည်။ တန်ဖိုးအမြင့်က ပိုမြန်၊ အနိမ့်က ပိုနှေးစေသည်။",
+            ),
         },
     )
 
@@ -470,6 +459,7 @@ if "dub_rows" in st.session_state:
             generated_audio_paths = []
             base_audio_clips = []
             timeline_audio_clips = []
+            video_match_segments = []
             source_video = None
             final_video = None
             composite_audio = None
@@ -477,21 +467,29 @@ if "dub_rows" in st.session_state:
             try:
                 usable_rows = []
                 for row in edited_rows.to_dict(orient="records"):
-                    text = str(row.get("မြန်မာဘာသာပြန်", "")).strip()
-                    if not text:
+                    start_value = row.get("Start (sec)")
+                    end_value = row.get("End (sec)")
+                    if pd.isna(start_value) or pd.isna(end_value):
                         continue
-                    start = float(row.get("Start (sec)", 0))
-                    end = float(row.get("End (sec)", 0))
+                    start = float(start_value)
+                    end = float(end_value)
                     if end <= start:
                         raise ValueError("စာကြောင်းတိုင်းရဲ့ End အချိန်က Start ထက် နောက်ကျရပါမယ်။")
-                    usable_rows.append((start, end, text))
+                    speed_value = row.get("Video speed (x)", 1.0)
+                    speed = 1.0 if pd.isna(speed_value) else float(speed_value)
+                    if not 0.5 <= speed <= 2.0:
+                        raise ValueError("Video speed ကို 0.5x မှ 2.0x အတွင်း ထားပါ။")
+
+                    text = str(row.get("မြန်မာဘာသာပြန်", "")).strip()
+                    if text and text.lower() != "nan":
+                        usable_rows.append((start, end, text, speed))
 
                 usable_rows.sort(key=lambda item: item[0])
                 if not usable_rows:
                     raise ValueError("မြန်မာဘာသာပြန်စာကြောင်း မရှိပါ။")
 
                 progress = st.progress(0.0, text="မြန်မာအသံဖိုင်များ ဖန်တီးနေပါသည်...")
-                for index, (start, end, text) in enumerate(usable_rows):
+                for index, (start, end, text, video_speed) in enumerate(usable_rows):
                     audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
                     audio_temp.close()
                     generated_audio_paths.append(audio_temp.name)
@@ -521,8 +519,7 @@ if "dub_rows" in st.session_state:
                             "-i",
                             audio_temp.name,
                             "-ac",
-                            "2",
-                            "-ar",
+                            "2",                            "-ar",
                             "44100",
                             "-c:a",
                             "pcm_s16le",
@@ -535,14 +532,12 @@ if "dub_rows" in st.session_state:
 
                     audio_clip = AudioFileClip(stereo_temp.name)
                     base_audio_clips.append(audio_clip)
-                    cue_duration = max(0.2, end - start)
-
-                    if fit_to_cue and audio_clip.duration > cue_duration:
-                        speed_factor = audio_clip.duration / cue_duration
-                        audio_clip = audio_clip.fx(vfx.speedx, speed_factor)
-
-                    audio_clip = audio_clip.volumex(audio_volume)
+                    voice_duration = float(audio_clip.duration)
                     clip_start = max(0.0, start + sync_offset)
+                    video_match_segments.append(
+                        (start, end, clip_start, voice_duration, video_speed)
+                    )
+                    audio_clip = audio_clip.volumex(audio_volume)
                     audio_clip = audio_clip.set_start(clip_start)
                     timeline_audio_clips.append(audio_clip)
 
@@ -551,19 +546,64 @@ if "dub_rows" in st.session_state:
                         text=f"အသံဖန်တီးနေသည် — {index + 1}/{len(usable_rows)}",
                     )
 
-                source_video = VideoFileClip(st.session_state["dub_video_path"])
-                video_for_render = (
-                    source_video.fx(vfx.mirror_x)
-                    if flip_video
-                    else source_video
+                source_video = VideoFileClip(
+                    st.session_state["dub_video_path"],
+                    audio=False,
                 )
-                if cloud_light_render and video_for_render.h > 720:
-                    video_for_render = video_for_render.resize(height=720)
-                video_for_render = video_for_render.without_audio()
-                render_fps = min(float(video_for_render.fps or 24), 24) if cloud_light_render else (video_for_render.fps or 24)
+                source_duration = float(source_video.duration)
+                video_overlays = []
+                for (
+                    start,
+                    end,
+                    voice_start,
+                    voice_duration,
+                    video_speed,
+                ) in video_match_segments:
+                    source_start = max(0.0, min(start, source_duration))
+                    source_end = min(max(source_start, end), source_duration)
+                    source_span = source_end - source_start
+                    target_duration = voice_duration / video_speed
+                    if source_span <= 0 or target_duration <= 0:
+                        continue
 
+                    video_part = source_video.subclip(source_start, source_end)
+                    speed_factor = source_span / target_duration
+                    if abs(speed_factor - 1.0) <= 0.001:
+                        continue
+                    video_part = video_part.fx(vfx.speedx, speed_factor)
+                    video_part = video_part.set_duration(target_duration)
+                    video_part = video_part.set_start(voice_start)
+                    video_overlays.append(video_part)
+
+                if video_overlays:
+                    video_for_render = CompositeVideoClip(
+                        [source_video] + video_overlays,
+                        size=source_video.size,
+                    )
+                    video_for_render = video_for_render.set_duration(
+                        max(
+                            source_duration,
+                            max(
+                                clip.start + clip.duration
+                                for clip in video_overlays
+                            ),
+                        )
+                    )
+                else:
+                    video_for_render = source_video
+
+                needs_video_encode = bool(video_overlays)
+                render_fps = video_for_render.fps or 24
+
+                timeline_duration = max(
+                    source_duration,
+                    max(
+                        voice_start + voice_duration
+                        for _, _, voice_start, voice_duration, _ in video_match_segments
+                    ),
+                )
                 composite_audio = CompositeAudioClip(timeline_audio_clips)
-                composite_audio = composite_audio.set_duration(video_for_render.duration)
+                composite_audio = composite_audio.set_duration(timeline_duration)
 
                 audio_for_video = composite_audio
                 if clarity_boost > 0:
@@ -603,10 +643,16 @@ if "dub_rows" in st.session_state:
                     audio_for_video = AudioFileClip(eq_mix.name)
                     base_audio_clips.append(audio_for_video)
                     audio_for_video = audio_for_video.set_duration(
-                        video_for_render.duration
+                        timeline_duration
                     )
 
-                final_video = video_for_render.set_audio(audio_for_video)
+                if video_for_render.duration < timeline_duration:
+                    video_for_render = video_for_render.fx(
+                        vfx.freeze,
+                        t="end",
+                        freeze_duration=timeline_duration - video_for_render.duration,
+                        padding_end=1.0 / render_fps,
+                    )
 
                 audio_output = tempfile.NamedTemporaryFile(
                     delete=False,
@@ -625,15 +671,62 @@ if "dub_rows" in st.session_state:
 
                 output_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
                 output_temp.close()
-                final_video.write_videofile(
-                    output_temp.name,
-                    codec="libx264",
-                    audio_codec="aac",
-                    fps=render_fps,
-                    preset="ultrafast",
-                    threads=1,
-                    logger=None,
-                )
+                if not needs_video_encode:
+                    try:
+                        subprocess.run(
+                            [
+                                imageio_ffmpeg.get_ffmpeg_exe(),
+                                "-y",
+                                "-i",
+                                st.session_state["dub_video_path"],
+                                "-i",
+                                audio_output.name,
+                                "-map",
+                                "0:v:0",
+                                "-map",
+                                "1:a:0",
+                                "-c:v",
+                                "copy",
+                                "-c:a",
+                                "aac",
+                                "-b:a",
+                                "192k",
+                                "-t",
+                                f"{source_duration:.3f}",
+                                "-movflags",
+                                "+faststart",
+                                output_temp.name,
+                            ],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                    except subprocess.CalledProcessError:
+                        st.warning(
+                            "မူရင်း video codec ကို တိုက်ရိုက်ထည့်မရပါ။ "
+                            "လိုအပ်သည့်အခါသာ video ကို ပြန် encode လုပ်နေပါသည်..."
+                        )
+                        final_video = video_for_render.set_audio(audio_for_video)
+                        final_video.write_videofile(
+                            output_temp.name,
+                            codec="libx264",
+                            audio_codec="aac",
+                            fps=render_fps,
+                            preset="ultrafast",
+                            threads=1,
+                            logger=None,
+                        )
+                else:
+                    final_video = video_for_render.set_audio(audio_for_video)
+                    final_video.write_videofile(
+                        output_temp.name,
+                        codec="libx264",
+                        audio_codec="aac",
+                        fps=render_fps,
+                        preset="ultrafast",
+                        threads=1,
+                        logger=None,
+                    )
 
                 st.session_state["dub_output_path"] = output_temp.name
                 st.success("အချိန်ကိုက် မြန်မာအသံပါသော ဗီဒီယို ပြီးပါပြီ။")
@@ -687,4 +780,4 @@ if "dub_output_path" in st.session_state:
                 data=output_file,
                 file_name="myanmar_dubbed_video.mp4",
                 mime="video/mp4",
-            )
+    )
