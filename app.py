@@ -258,7 +258,13 @@ Input lines:
 def format_srt_timestamp(seconds):
     total_ms = max(0, int(round(float(seconds) * 1000)))
     hours, remainder = divmod(total_ms, 3_600_000)
-    minutes, remainder = divmod(remainder, 60_000)    whole_seconds, milliseconds = divmod(remainder, 1000)
+    minutes, remainder = divmod(remainder, 60_000)
+    whole_seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
+
+    return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
+ divmod(remainder, 1000)
+    whole_seconds, milliseconds = divmod(remainder, 1000)
     return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
 
 
