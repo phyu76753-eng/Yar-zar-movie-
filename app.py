@@ -283,11 +283,7 @@ def build_srt(rows, text_column, offset=0.0):
         )
     return "\n\n".join(blocks) + ("\n" if blocks else "")
     
-            f"{index}\n"
-            f"{format_srt_timestamp(start)} --> {format_srt_timestamp(end)}\n"
-            f"{text}"
-        )
-    return "\n\n".join(blocks) + ("\n" if blocks else "")
+            
     
 async def save_tts_audio(text, voice, rate, pitch, output_path):
     communicator = edge_tts.Communicate(
