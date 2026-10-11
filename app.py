@@ -297,7 +297,24 @@ async def save_tts_audio(text, voice, rate, pitch, output_path):
 
 # ---------- Sidebar controls ----------
 st.sidebar.header("⚙️ အသံနှင့် Sync ချိန်ညှိမှု")
-api_key = st.sidebar.text_input("Gemini API Key", type="password")
+try:
+    api_key = str(st.secrets.get("GEMINI_API_KEY", "")).strip()
+except Exception:
+    api_key = ""
+
+if api_key:
+    st.sidebar.success("Gemini API Key ကို လုံခြုံသော app settings မှ ဖတ်ပြီးပါပြီ။")
+else:
+    st.sidebar.caption(
+        "API Key ကို ခဏခဏမထည့်ရစေရန် Streamlit app Settings → Secrets မှာ "
+        "GEMINI_API_KEY အဖြစ် တစ်ကြိမ်သိမ်းနိုင်ပါတယ်။ မသိမ်းထားပါက ဒီနေရာမှာ ထည့်ပါ။"
+    )
+    api_key = st.sidebar.text_input(
+        "Gemini API Key",
+        type="password",
+        key="gemini_api_key_input",
+    )
+
 voice_option = st.sidebar.selectbox(
     "မြန်မာအသံ",
     ["my-MM-ThihaNeural (Male)", "my-MM-NilarNeural (Female)"],
