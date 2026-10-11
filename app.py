@@ -261,17 +261,7 @@ def format_srt_timestamp(seconds):
     minutes, remainder = divmod(remainder, 60_000)
     whole_seconds, milliseconds = divmod(remainder, 1000)
     return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
-
-    return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
- divmod(remainder, 1000)
-    whole_seconds, milliseconds = divmod(remainder, 1000)
-    return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
-
-
-def build_srt(rows, text_column, offset=0.0):
-    entries = []
-    for row in rows:
-        text = str(row.get(text_column, "")).strip()
+    
         if not text or text.lower() == "nan":
             continue
         start = max(0.0, float(row["Start (sec)"]) + offset)
