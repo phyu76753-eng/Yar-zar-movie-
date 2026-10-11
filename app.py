@@ -261,7 +261,12 @@ def format_srt_timestamp(seconds):
     minutes, remainder = divmod(remainder, 60_000)
     whole_seconds, milliseconds = divmod(remainder, 1000)
     return f"{hours:02}:{minutes:02}:{whole_seconds:02},{milliseconds:03}"
-    
+
+
+def build_srt(rows, text_column, offset=0.0):
+    entries = []
+    for row in rows:
+        text = str(row.get(text_column, "")).strip()
         if not text or text.lower() == "nan":
             continue
         start = max(0.0, float(row["Start (sec)"]) + offset)
@@ -277,8 +282,13 @@ def format_srt_timestamp(seconds):
             f"{text}"
         )
     return "\n\n".join(blocks) + ("\n" if blocks else "")
-
-
+    
+            f"{index}\n"
+            f"{format_srt_timestamp(start)} --> {format_srt_timestamp(end)}\n"
+            f"{text}"
+        )
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
+    
 async def save_tts_audio(text, voice, rate, pitch, output_path):
     communicator = edge_tts.Communicate(
         text=text,
